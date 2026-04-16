@@ -873,89 +873,6 @@ const C = {
   border:    [225, 218, 206],
 };
 
-function drawActivumHeader(doc, W, mL, mR, cW, c, totalStr) {
-  doc.setFillColor(...C.burgundy);
-  doc.rect(0, 0, W, 50, 'F');
-  doc.setFillColor(...C.gold);
-  doc.rect(0, 48, W, 2, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(255, 255, 255);
-  doc.setCharSpace(2.5);
-  doc.text('ACTIVUM', mL, 14);
-  doc.setCharSpace(0);
-
-  doc.setDrawColor(255, 255, 255);
-  doc.setLineWidth(0.3);
-  doc.line(mL + 38, 11, mL + 38, 17);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(...C.gold);
-  doc.text('Departamento de Innovacion', mL + 42, 14);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(19);
-  doc.setTextColor(255, 255, 255);
-  const titleLines = doc.splitTextToSize(c.concept, cW - 58);
-  doc.text(titleLines, mL, 34);
-
-  const bW = 54, bH = 18, bX = W - mR - bW, bY = 15;
-  doc.setFillColor(...C.burgundyD);
-  doc.rect(bX, bY, bW, bH, 'F');
-  doc.setFillColor(...C.gold);
-  doc.rect(bX, bY, 3, bH, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.setTextColor(255, 255, 255);
-  doc.text(totalStr, bX + bW - 5, bY + 10, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6);
-  doc.setTextColor(...C.gold);
-  doc.text('TOTAL ACUMULADO', bX + 7, bY + 15);
-
-  doc.setFillColor(...C.creamD);
-  doc.rect(0, 50, W, 20, 'F');
-
-  const meta = [
-    { label: 'FECHA', value: reportDate },
-    { label: 'FACTURAS', value: String(files.filter(f => f.status === 'done').length) },
-    { label: 'LINEAS', value: String(c.entries.length) },
-    { label: 'MONEDA', value: c.currency },
-  ];
-  const mCW = cW / meta.length;
-  meta.forEach((m, i) => {
-    const x = mL + i * mCW;
-    if (i > 0) {
-      doc.setDrawColor(...C.border);
-      doc.setLineWidth(0.25);
-      doc.line(x - 2, 53, x - 2, 67);
-    }
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor(...C.text3);
-    doc.text(m.label, x, 57);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(...C.text);
-    doc.text(m.value, x, 64);
-  });
-}
-
-function drawPDFFooter(doc, W, H, mL, pageNum) {
-  doc.setFillColor(...C.creamD);
-  doc.rect(0, H - 16, W, 16, 'F');
-  doc.setFillColor(...C.gold);
-  doc.rect(0, H - 16, W, 0.8, 'F');
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(...C.text3);
-  doc.text('Activum Real Estate · Departamento de Innovacion', mL, H - 7);
-  doc.text('Meta Ads Rebilling Agent', W / 2, H - 7, { align: 'center' });
-  doc.text('Pag. ' + pageNum, W - mL, H - 7, { align: 'right' });
-}
-
 function buildConceptPDF(conceptKey) {
   const c = aggregated[conceptKey];
   if (!c) return null;
@@ -963,91 +880,168 @@ function buildConceptPDF(conceptKey) {
   try {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const W = 210, H = 297, mL = 18, mR = 18, cW = W - mL - mR;
+    const W = 210, H = 297, mL = 20, mR = 20, cW = W - mL - mR;
     const totalStr = fmt(c.total, c.currency);
+    const totalFiles = files.filter(f => f.status === 'done').length;
 
-    drawActivumHeader(doc, W, mL, mR, cW, c, totalStr);
+    // ── HEADER ───────────────────────────────────────────────────────────
+    // Left: "Refacturación para" (label) + concept name (title) + company
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...C.text2);
+    doc.text('Refacturación para', mL, 20);
 
-    // Section heading
-    let y = 80;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(...C.text);
+    const titleLines = doc.splitTextToSize(c.concept, cW * 0.62);
+    doc.text(titleLines, mL, 28);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.text3);
+    doc.text('Activum Gestión de Proyectos Inmobiliarios, S.L.', mL, 36);
+
+    // Right: ACTIVUM wordmark
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.setTextColor(...C.burgundy);
+    doc.setCharSpace(1.5);
+    doc.text('ACTIVUM', W - mR, 25, { align: 'right' });
+    doc.setCharSpace(0);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
-    doc.setTextColor(...C.text3);
-    doc.text('DESGLOSE POR FACTURA DE ORIGEN', mL, y);
-    y += 3;
-    doc.setDrawColor(...C.gold);
-    doc.setLineWidth(0.5);
-    doc.line(mL, y, mL + 58, y);
-    doc.setDrawColor(...C.border);
-    doc.setLineWidth(0.2);
-    doc.line(mL + 58, y, W - mR, y);
-    y += 7;
+    doc.setTextColor(...C.gold);
+    doc.text('Real Estate', W - mR, 31, { align: 'right' });
 
-    // Table
-    doc.autoTable({
-      startY: y,
-      head: [['#', 'Archivo de factura', 'Importe']],
-      body: c.entries.map((e, idx) => [
-        String(idx + 1).padStart(2, '0'),
-        e.file.replace(/\.pdf$/i, ''),
-        fmt(e.amount, c.currency)
-      ]),
-      margin: { left: mL, right: mR, bottom: 20 },
-      tableWidth: cW,
-      styles: {
-        font: 'helvetica', fontSize: 9,
-        cellPadding: { top: 5, bottom: 5, left: 6, right: 6 },
-        textColor: C.text2, lineColor: C.border, lineWidth: 0.2,
-      },
-      headStyles: {
-        fillColor: C.burgundy, textColor: [255, 255, 255],
-        fontStyle: 'bold', fontSize: 7.5,
-        cellPadding: { top: 5.5, bottom: 5.5, left: 6, right: 6 },
-      },
-      alternateRowStyles: { fillColor: C.cream },
-      bodyStyles: { fillColor: C.white },
-      columnStyles: {
-        0: { cellWidth: 12, halign: 'center', textColor: C.text3, fontSize: 8 },
-        1: { cellWidth: 'auto' },
-        2: { cellWidth: 42, halign: 'right', fontStyle: 'bold', textColor: C.text },
-      },
-      didDrawPage: function(data) {
-        drawPDFFooter(doc, W, H, mL, data.pageNumber);
-      },
+    // Separator
+    doc.setDrawColor(...C.border);
+    doc.setLineWidth(0.4);
+    doc.line(mL, 43, W - mR, 43);
+
+    // ── INFO LEFT + TOTAL RIGHT ───────────────────────────────────────────
+    const infoItems = [
+      { label: 'Fecha de nota de pago/comprobante', value: reportDate },
+      { label: 'Método de pago', value: 'Meta Ads Rebilling Agent' },
+      { label: 'Número de referencia', value: 'ACTV-' + new Date().getFullYear() + '-' + String(Object.keys(aggregated).indexOf(conceptKey) + 1).padStart(3,'0') },
+      { label: 'Facturas de origen', value: totalFiles + ' factura(s) procesada(s)' },
+      { label: 'Tipo de servicio', value: 'Meta Ads · Publicidad digital' },
+    ];
+
+    let ly = 53;
+    infoItems.forEach(item => {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...C.text3);
+      doc.text(item.label, mL, ly);
+      ly += 4.5;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(...C.text);
+      doc.text(item.value, mL, ly);
+      ly += 8;
+    });
+
+    // Right: "Pagado" + big total + description
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(22, 160, 80);
+    doc.text('Pagado', W - mR, 53, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(28);
+    doc.setTextColor(...C.text);
+    doc.text(totalStr, W - mR, 68, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C.text3);
+    const descLines = doc.splitTextToSize(
+      'Importe total acumulado de ' + totalFiles + ' factura(s) de Meta Ads.',
+      cW * 0.44
+    );
+    doc.text(descLines, W - mR, 76, { align: 'right' });
+
+    // Second separator
+    const sep2Y = Math.max(ly + 5, 120);
+    doc.setDrawColor(...C.border);
+    doc.setLineWidth(0.4);
+    doc.line(mL, sep2Y, W - mR, sep2Y);
+
+    // ── DESGLOSE ─────────────────────────────────────────────────────────
+    let y = sep2Y + 10;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C.text);
+    doc.text('Desglose por factura de origen', mL, y);
+    y += 12;
+
+    const footerStart = H - 38;
+
+    c.entries.forEach(e => {
+      if (y > footerStart - 14) {
+        doc.addPage();
+        y = 20;
+      }
+
+      // Entry: filename left + amount right
+      const fname = e.file.replace(/\.pdf$/i, '');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...C.text);
+      const nameLines = doc.splitTextToSize(fname, cW - 32);
+      doc.text(nameLines, mL, y);
+      doc.text(fmt(e.amount, c.currency), W - mR, y, { align: 'right' });
+      y += nameLines.length > 1 ? nameLines.length * 5 : 5;
+
+      // Dashed separator
+      doc.setDrawColor(...C.border);
+      doc.setLineWidth(0.15);
+      const dL = 1.8, gL = 1.2;
+      for (let dx = mL; dx < W - mR - dL; dx += dL + gL) {
+        doc.line(dx, y, dx + dL, y);
+      }
+      y += 8;
     });
 
     // Total row
-    const endY = doc.lastAutoTable.finalY;
-    const rH = 15;
-    doc.setFillColor(...C.burgundy);
-    doc.rect(mL, endY, cW, rH, 'F');
-    doc.setFillColor(...C.gold);
-    doc.rect(mL, endY, 3, rH, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(255, 255, 255);
-    doc.text('TOTAL ACUMULADO', mL + 9, endY + rH / 2 + 1.5);
-    doc.setFontSize(13);
-    doc.text(totalStr, W - mR - 4, endY + rH / 2 + 2, { align: 'right' });
+    doc.setDrawColor(...C.text);
+    doc.setLineWidth(0.5);
+    doc.line(mL, y, W - mR, y);
+    y += 7;
 
-    // Note box
-    const noteY = endY + rH + 12;
-    if (noteY + 22 < H - 20) {
-      doc.setFillColor(...C.cream);
-      doc.setDrawColor(...C.border);
-      doc.setLineWidth(0.25);
-      doc.rect(mL, noteY, cW, 20, 'FD');
-      doc.setFillColor(...C.gold);
-      doc.rect(mL, noteY, 3, 20, 'F');
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(...C.text2);
-      const noteText = 'Generado por el Agente de Refacturacion de Meta Ads - Activum Innovacion.';
-      doc.text(noteText, mL + 8, noteY + 8, { maxWidth: cW - 14 });
-      doc.setTextColor(...C.text3);
-      const noteText2 = 'Concepto: ' + c.concept + ' - ' + c.entries.length + ' lineas - ' + files.filter(f => f.status === 'done').length + ' factura(s).';
-      doc.text(noteText2, mL + 8, noteY + 15, { maxWidth: cW - 14 });
-    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...C.text);
+    doc.text('Total', mL, y);
+    doc.text(totalStr, W - mR, y, { align: 'right' });
+
+    // ── FOOTER ───────────────────────────────────────────────────────────
+    const fY = H - 30;
+    doc.setDrawColor(...C.border);
+    doc.setLineWidth(0.3);
+    doc.line(mL, fY, W - mR, fY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(...C.text3);
+
+    doc.text('Activum Gestión de Proyectos Inmobiliarios, S.L.', mL, fY + 6);
+    doc.text('Calle Colombia, 11, 9, Oficina 83', mL, fY + 11);
+    doc.text('03010 Alicante · España', mL, fY + 16);
+    doc.text('VAT: ESB54591102', mL, fY + 21);
+
+    doc.text('Generado por Activum Innovación', W - mR, fY + 6, { align: 'right' });
+    doc.text('Meta Ads Rebilling Agent', W - mR, fY + 11, { align: 'right' });
+    doc.text(reportDate, W - mR, fY + 16, { align: 'right' });
+
+    doc.setFontSize(5.5);
+    doc.text(
+      'Documento generado automáticamente por el sistema de refacturación de Activum. ' +
+      'Los importes reflejan los costes de Meta Ads para redistribución interna.',
+      mL, fY + 26, { maxWidth: cW }
+    );
 
     return { doc, filename: 'activum_refacturacion_' + slugify(c.concept) + '.pdf' };
   } catch (err) {
