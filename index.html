@@ -732,18 +732,23 @@ async function extractFromPDF(fileObj) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: `You are a Meta Ads invoice parser. Extract all billing line items from the PDF invoice.
-Return ONLY a valid JSON array. Each object must have:
-- "concept": string — billing concept/description (normalize names consistently across invoices)
-- "amount": number — monetary amount (positive or negative)
+      max_tokens: 2000,
+      system: `You are a Meta Ads invoice parser. Extract all billing campaigns from the PDF invoice.
+Return ONLY a valid JSON array. Each object represents one campaign and must have:
+- "campaign": string — campaign name (normalize consistently across invoices)
+- "period": string — billing period as shown in the invoice (e.g. "26 feb. 2026 – 3 mar. 2026")
+- "total": number — campaign total amount
 - "currency": string — ISO currency code (e.g. "EUR", "USD")
-Rules: separate taxes, adjustments, credits as individual entries. Do NOT include grand totals. No markdown, no backticks, raw JSON only.`,
+- "items": array of line items, each with:
+  - "name": string — ad set or line item name
+  - "impressions": number or null — impression count if present
+  - "amount": number — line item amount
+Rules: do NOT include grand totals. No markdown, no backticks, raw JSON only.`,
       messages: [{
         role: 'user',
         content: [
           { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-          { type: 'text', text: `Extract all billing line items. File: ${fileObj.name}` }
+          { type: 'text', text: `Extract all campaigns with their line items. File: ${fileObj.name}` }
         ]
       }]
     })
@@ -773,12 +778,12 @@ async function processAll() {
       const result = await extractFromPDF(f);
       rawResults.push(result);
       f.status = 'done';
-      log(`✓ ${f.name}  ·  ${result.items.length} conceptos extraídos`, 'ok');
+      log(`✓ ${f.name}  ·  ${result.items.length} campañas extraídas`, 'ok');
       for (const item of result.items) {
-        const key = item.concept;
-        if (!aggregated[key]) aggregated[key] = { concept: key, currency: item.currency, total: 0, entries: [] };
-        aggregated[key].total += item.amount;
-        aggregated[key].entries.push({ file: f.name, amount: item.amount });
+        const key = item.campaign;
+        if (!aggregated[key]) aggregated[key] = { campaign: key, currency: item.currency, total: 0, entries: [] };
+        aggregated[key].total += item.total;
+        aggregated[key].entries.push({ file: f.name, period: item.period, total: item.total, items: item.items || [] });
       }
     } catch(err) {
       f.status = 'error';
@@ -805,7 +810,7 @@ function renderResults() {
   const grandTotal = concepts.reduce((s,c)=>s+c.total, 0);
   const currency   = concepts[0]?.currency || 'EUR';
 
-  document.getElementById('resultsSub').textContent = `${totalFiles} factura${totalFiles!==1?'s':''} · ${concepts.length} concepto${concepts.length!==1?'s':''}`;
+  document.getElementById('resultsSub').textContent = `${totalFiles} factura${totalFiles!==1?'s':''} · ${concepts.length} campaña${concepts.length!==1?'s':''}`;
 
   document.getElementById('summaryGrid').innerHTML = `
     <div class="stat-card">
@@ -817,7 +822,7 @@ function renderResults() {
       <div class="stat-value">${totalFiles}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Conceptos únicos</div>
+      <div class="stat-label">Campañas únicas</div>
       <div class="stat-value">${concepts.length}</div>
     </div>`;
 
@@ -829,24 +834,30 @@ function renderResults() {
         <div class="concept-left">
           <span class="concept-index">${String(i+1).padStart(2,'0')}</span>
           <div>
-            <div class="concept-name">${c.concept}</div>
-            <div class="concept-count">${c.entries.length} línea${c.entries.length!==1?'s':''}</div>
+            <div class="concept-name">${c.campaign}</div>
+            <div class="concept-count">${c.entries.length} factura${c.entries.length!==1?'s':''} · ${c.entries.reduce((s,e)=>s+e.items.length,0)} líneas</div>
           </div>
         </div>
         <span class="concept-total">${fmt(c.total,c.currency)}</span>
       </div>
       <table class="concept-table">
         <thead>
-          <tr><th>Archivo de factura</th><th>Importe</th></tr>
+          <tr><th>Factura / Período</th><th>Línea</th><th>Impresiones</th><th>Importe</th></tr>
         </thead>
         <tbody>
-          ${c.entries.map(e=>`<tr><td>${e.file.replace(/\.pdf$/i,'')}</td><td>${fmt(e.amount,c.currency)}</td></tr>`).join('')}
+          ${c.entries.map(e=>`
+            <tr style="background:var(--cream)">
+              <td colspan="3" style="font-weight:600">${e.file.replace(/\.pdf$/i,'')}<span style="font-weight:400;color:var(--text3);margin-left:8px">${e.period||''}</span></td>
+              <td style="font-weight:600">${fmt(e.total,c.currency)}</td>
+            </tr>
+            ${e.items.map(it=>`<tr><td></td><td>${it.name}</td><td style="color:var(--text3)">${it.impressions!=null?new Intl.NumberFormat('es-ES').format(it.impressions)+' imp.':''}</td><td>${fmt(it.amount,c.currency)}</td></tr>`).join('')}
+          `).join('')}
         </tbody>
       </table>
       <div class="concept-footer">
-        <button class="btn-dl pdf"  onclick="downloadConceptPDF('${esc(c.concept)}')">↓ PDF</button>
-        <button class="btn-dl"      onclick="downloadConcept('${esc(c.concept)}','xlsx')">↓ Excel</button>
-        <button class="btn-dl"      onclick="downloadConcept('${esc(c.concept)}','csv')">↓ CSV</button>
+        <button class="btn-dl pdf"  onclick="downloadConceptPDF('${esc(c.campaign)}')">↓ PDF</button>
+        <button class="btn-dl"      onclick="downloadConcept('${esc(c.campaign)}','xlsx')">↓ Excel</button>
+        <button class="btn-dl"      onclick="downloadConcept('${esc(c.campaign)}','csv')">↓ CSV</button>
       </div>
     </div>`).join('');
 
@@ -894,7 +905,7 @@ function buildConceptPDF(conceptKey) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
     doc.setTextColor(...C.text);
-    const titleLines = doc.splitTextToSize(c.concept, cW * 0.62);
+    const titleLines = doc.splitTextToSize(c.campaign, cW * 0.62);
     doc.text(titleLines, mL, 28);
 
     doc.setFont('helvetica', 'normal');
@@ -968,32 +979,36 @@ function buildConceptPDF(conceptKey) {
     doc.setLineWidth(0.4);
     doc.line(mL, sep2Y, W - mR, sep2Y);
 
-    // ── DESGLOSE ─────────────────────────────────────────────────────────
+    // ── CAMPAÑAS ─────────────────────────────────────────────────────────
     let y = sep2Y + 10;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(...C.text);
-    doc.text('Desglose por factura de origen', mL, y);
+    doc.text('Campañas', mL, y);
     y += 12;
 
     const footerStart = H - 38;
 
     c.entries.forEach(e => {
-      if (y > footerStart - 14) {
-        doc.addPage();
-        y = 20;
-      }
+      if (y > footerStart - 20) { doc.addPage(); y = 20; }
 
-      // Entry: filename left + amount right
-      const fname = e.file.replace(/\.pdf$/i, '');
+      // Campaign header: name (bold) + total (right)
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(...C.text);
-      const nameLines = doc.splitTextToSize(fname, cW - 32);
-      doc.text(nameLines, mL, y);
-      doc.text(fmt(e.amount, c.currency), W - mR, y, { align: 'right' });
-      y += nameLines.length > 1 ? nameLines.length * 5 : 5;
+      doc.text(c.campaign, mL, y);
+      doc.text(fmt(e.total, c.currency), W - mR, y, { align: 'right' });
+      y += 5;
+
+      // Period (gray, small)
+      if (e.period) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(...C.text3);
+        doc.text('De ' + e.period, mL, y);
+        y += 5;
+      }
 
       // Dashed separator
       doc.setDrawColor(...C.border);
@@ -1002,7 +1017,28 @@ function buildConceptPDF(conceptKey) {
       for (let dx = mL; dx < W - mR - dL; dx += dL + gL) {
         doc.line(dx, y, dx + dL, y);
       }
-      y += 8;
+      y += 6;
+
+      // Sub-items (indented)
+      const indent = mL + 10;
+      e.items.forEach(it => {
+        if (y > footerStart - 8) { doc.addPage(); y = 20; }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(...C.text2);
+        const iNameLines = doc.splitTextToSize(it.name, cW - 55);
+        doc.text(iNameLines, indent, y);
+        if (it.impressions != null) {
+          doc.setTextColor(...C.text3);
+          doc.text(new Intl.NumberFormat('es-ES').format(it.impressions) + ' Impresiones', W - mR - 30, y, { align: 'right' });
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...C.text2);
+        doc.text(fmt(it.amount, c.currency), W - mR, y, { align: 'right' });
+        y += iNameLines.length > 1 ? iNameLines.length * 4.5 : 6;
+      });
+
+      y += 5;
     });
 
     // Total row
@@ -1043,7 +1079,7 @@ function buildConceptPDF(conceptKey) {
       mL, fY + 26, { maxWidth: cW }
     );
 
-    return { doc, filename: 'activum_refacturacion_' + slugify(c.concept) + '.pdf' };
+    return { doc, filename: 'activum_refacturacion_' + slugify(c.campaign) + '.pdf' };
   } catch (err) {
     log('Error generando PDF: ' + err.message, 'err');
     console.error(err);
@@ -1084,19 +1120,27 @@ function downloadAllPDF() {
 /* CSV / Excel */
 function downloadConcept(concept, format) {
   const c = aggregated[concept]; if (!c) return;
-  const rows = [
-    ['Concepto','Archivo origen','Importe','Moneda'],
-    ...c.entries.map(e => [c.concept, e.file, e.amount, c.currency]),
-    ['','TOTAL', c.total, c.currency]
-  ];
+  const rows = [['Campaña','Factura origen','Período','Línea','Impresiones','Importe','Moneda']];
+  for (const e of c.entries) {
+    for (const it of e.items) {
+      rows.push([c.campaign, e.file, e.period||'', it.name, it.impressions??'', it.amount, c.currency]);
+    }
+    rows.push(['','','','SUBTOTAL '+e.file,'', e.total, c.currency]);
+    rows.push([]);
+  }
+  rows.push(['','','','TOTAL','', c.total, c.currency]);
   exportRows(rows, `activum_rebilling_${slugify(concept)}`, format);
 }
 
 function downloadAll(format) {
-  const rows = [['Concepto','Archivo origen','Importe','Moneda']];
+  const rows = [['Campaña','Factura origen','Período','Línea','Impresiones','Importe','Moneda']];
   for (const c of Object.values(aggregated)) {
-    for (const e of c.entries) rows.push([c.concept, e.file, e.amount, c.currency]);
-    rows.push(['','SUBTOTAL '+c.concept, c.total, c.currency]);
+    for (const e of c.entries) {
+      for (const it of e.items) {
+        rows.push([c.campaign, e.file, e.period||'', it.name, it.impressions??'', it.amount, c.currency]);
+      }
+    }
+    rows.push(['','','','SUBTOTAL '+c.campaign,'', c.total, c.currency]);
     rows.push([]);
   }
   exportRows(rows, 'activum_meta_ads_refacturacion_completa', format);
