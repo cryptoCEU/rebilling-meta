@@ -42,9 +42,10 @@ body {
 
 /* ── TOP NAVBAR ─────────────────────────────── */
 .navbar {
-  background: var(--burgundy);
+  background: var(--cream);
+  border-bottom: 1px solid var(--border);
   padding: 0 2.5rem;
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -56,37 +57,28 @@ body {
 .navbar-logo {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
-.logo-mark {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-}
-
-.logo-wordmark {
-  font-family: var(--serif);
-  font-weight: 300;
-  font-size: 20px;
-  letter-spacing: 0.18em;
-  color: #fff;
-  text-transform: uppercase;
+.logo-img {
+  height: 46px;
+  width: auto;
+  display: block;
 }
 
 .navbar-badge {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.55);
-  border: 0.5px solid rgba(255,255,255,0.2);
+  color: var(--text3);
+  border: 0.5px solid var(--border2);
   padding: 3px 10px;
   border-radius: 20px;
 }
 
 /* ── HERO STRIP ─────────────────────────────── */
 .hero {
-  background: var(--burgundy-d);
+  background: var(--cream-dark);
+  border-bottom: 1px solid var(--border);
   padding: 2.5rem 2.5rem 2rem;
 }
 
@@ -99,9 +91,10 @@ body {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.14em;
-  color: var(--gold);
+  color: var(--burgundy);
   text-transform: uppercase;
   margin-bottom: 10px;
+  opacity: 0.7;
 }
 
 .hero h1 {
@@ -109,19 +102,19 @@ body {
   font-weight: 300;
   font-size: 38px;
   line-height: 1.1;
-  color: #fff;
+  color: var(--text);
   letter-spacing: -0.01em;
   margin-bottom: 8px;
 }
 
 .hero h1 em {
   font-style: italic;
-  color: rgba(255,255,255,0.65);
+  color: var(--text3);
 }
 
 .hero-sub {
   font-size: 13px;
-  color: rgba(255,255,255,0.5);
+  color: var(--text2);
   font-weight: 300;
 }
 
@@ -581,13 +574,7 @@ body {
 <!-- NAVBAR -->
 <nav class="navbar">
   <div class="navbar-logo">
-    <!-- Activum logomark SVG -->
-    <svg class="logo-mark" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect width="30" height="30" rx="4" fill="rgba(255,255,255,0.08)"/>
-      <path d="M15 5L24 22H6L15 5Z" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.2"/>
-      <path d="M9.5 22L15 11.5L20.5 22" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="0.8"/>
-    </svg>
-    <span class="logo-wordmark">Activum</span>
+    <img src="/logo.svg" class="logo-img" alt="Activum">
   </div>
   <span class="navbar-badge">Innovation · Herramientas IA</span>
 </nav>
