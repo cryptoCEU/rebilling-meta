@@ -733,22 +733,33 @@ async function extractFromPDF(fileObj) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2000,
-      system: `You are a Meta Ads invoice parser. Extract all billing campaigns from the PDF invoice.
-Return ONLY a valid JSON array. Each object represents one campaign and must have:
-- "campaign": string — campaign name (normalize consistently across invoices)
-- "period": string — billing period as shown in the invoice (e.g. "26 feb. 2026 – 3 mar. 2026")
-- "total": number — campaign total amount
-- "currency": string — ISO currency code (e.g. "EUR", "USD")
-- "items": array of line items, each with:
-  - "name": string — ad set or line item name
-  - "impressions": number or null — impression count if present
-  - "amount": number — line item amount
-Rules: do NOT include grand totals. No markdown, no backticks, raw JSON only.`,
+      system: `You are a Meta Ads invoice parser. Extract structured data from a Meta Ads invoice PDF.
+Return ONLY a valid JSON object with this exact shape:
+{
+  "invoice_date": string,   // payment date as shown, e.g. "3 mar. 2026"
+  "invoice_ref": string,    // reference number, e.g. "FBADS-682-105578484"
+  "currency": string,       // ISO code, e.g. "EUR"
+  "campaigns": [
+    {
+      "project": string,      // campaign/project name exactly as shown
+      "period": string,       // billing period, e.g. "26 feb. 2026 – 3 mar. 2026"
+      "total": number,        // campaign subtotal
+      "items": [
+        {
+          "name": string,         // ad set name
+          "impressions": number,  // impression count (0 if not shown)
+          "amount": number        // line item amount
+        }
+      ]
+    }
+  ]
+}
+Rules: extract ALL campaigns. Do NOT include invoice grand total in campaigns. No markdown, no backticks, raw JSON only.`,
       messages: [{
         role: 'user',
         content: [
           { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-          { type: 'text', text: `Extract all campaigns with their line items. File: ${fileObj.name}` }
+          { type: 'text', text: `Extract invoice data. File: ${fileObj.name}` }
         ]
       }]
     })
@@ -757,7 +768,14 @@ Rules: do NOT include grand totals. No markdown, no backticks, raw JSON only.`,
   const data = await resp.json();
   const text = (data.content||[]).map(b=>b.text||'').join('').trim();
   const clean = text.replace(/^```json\s*/i,'').replace(/```\s*$/,'').trim();
-  return { file: fileObj.name, items: JSON.parse(clean) };
+  const parsed = JSON.parse(clean);
+  return {
+    file: fileObj.name,
+    invoice_date: parsed.invoice_date || '',
+    invoice_ref:  parsed.invoice_ref  || '',
+    currency:     parsed.currency     || 'EUR',
+    campaigns:    parsed.campaigns    || [],
+  };
 }
 
 async function processAll() {
@@ -778,12 +796,19 @@ async function processAll() {
       const result = await extractFromPDF(f);
       rawResults.push(result);
       f.status = 'done';
-      log(`✓ ${f.name}  ·  ${result.items.length} campañas extraídas`, 'ok');
-      for (const item of result.items) {
-        const key = item.campaign;
-        if (!aggregated[key]) aggregated[key] = { campaign: key, currency: item.currency, total: 0, entries: [] };
-        aggregated[key].total += item.total;
-        aggregated[key].entries.push({ file: f.name, period: item.period, total: item.total, items: item.items || [] });
+      log(`✓ ${f.name}  ·  ${result.campaigns.length} campañas extraídas`, 'ok');
+      for (const camp of result.campaigns) {
+        const key = camp.project;
+        if (!aggregated[key]) aggregated[key] = { project: key, currency: result.currency, total: 0, tramos: [] };
+        aggregated[key].total += camp.total;
+        aggregated[key].tramos.push({
+          file: f.name,
+          invoice_date: result.invoice_date,
+          invoice_ref:  result.invoice_ref,
+          period: camp.period,
+          total:  camp.total,
+          items:  camp.items || [],
+        });
       }
     } catch(err) {
       f.status = 'error';
@@ -810,7 +835,7 @@ function renderResults() {
   const grandTotal = concepts.reduce((s,c)=>s+c.total, 0);
   const currency   = concepts[0]?.currency || 'EUR';
 
-  document.getElementById('resultsSub').textContent = `${totalFiles} factura${totalFiles!==1?'s':''} · ${concepts.length} campaña${concepts.length!==1?'s':''}`;
+  document.getElementById('resultsSub').textContent = `${totalFiles} factura${totalFiles!==1?'s':''} · ${concepts.length} proyecto${concepts.length!==1?'s':''}`;
 
   document.getElementById('summaryGrid').innerHTML = `
     <div class="stat-card">
@@ -822,7 +847,7 @@ function renderResults() {
       <div class="stat-value">${totalFiles}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Campañas únicas</div>
+      <div class="stat-label">Proyectos únicos</div>
       <div class="stat-value">${concepts.length}</div>
     </div>`;
 
@@ -834,30 +859,31 @@ function renderResults() {
         <div class="concept-left">
           <span class="concept-index">${String(i+1).padStart(2,'0')}</span>
           <div>
-            <div class="concept-name">${c.campaign}</div>
-            <div class="concept-count">${c.entries.length} factura${c.entries.length!==1?'s':''} · ${c.entries.reduce((s,e)=>s+e.items.length,0)} líneas</div>
+            <div class="concept-name">${c.project}</div>
+            <div class="concept-count">${c.tramos.length} tramo${c.tramos.length!==1?'s':''} · ${c.tramos.reduce((s,t)=>s+t.items.length,0)} líneas</div>
           </div>
         </div>
         <span class="concept-total">${fmt(c.total,c.currency)}</span>
       </div>
       <table class="concept-table">
         <thead>
-          <tr><th>Factura / Período</th><th>Línea</th><th>Impresiones</th><th>Importe</th></tr>
+          <tr><th>Período</th><th>Línea de anuncio</th><th>Impresiones</th><th>Importe</th></tr>
         </thead>
         <tbody>
-          ${c.entries.map(e=>`
+          ${c.tramos.map(t=>`
             <tr style="background:var(--cream)">
-              <td colspan="3" style="font-weight:600">${e.file.replace(/\.pdf$/i,'')}<span style="font-weight:400;color:var(--text3);margin-left:8px">${e.period||''}</span></td>
-              <td style="font-weight:600">${fmt(e.total,c.currency)}</td>
+              <td colspan="2" style="font-weight:600">${t.period||''}</td>
+              <td></td>
+              <td style="font-weight:600">${fmt(t.total,c.currency)}</td>
             </tr>
-            ${e.items.map(it=>`<tr><td></td><td>${it.name}</td><td style="color:var(--text3)">${it.impressions!=null?new Intl.NumberFormat('es-ES').format(it.impressions)+' imp.':''}</td><td>${fmt(it.amount,c.currency)}</td></tr>`).join('')}
+            ${t.items.map(it=>`<tr><td style="color:var(--text3);font-size:11px">${t.invoice_date||''}</td><td>${it.name}</td><td style="color:var(--text3)">${it.impressions?new Intl.NumberFormat('es-ES').format(it.impressions)+' imp.':''}</td><td>${fmt(it.amount,c.currency)}</td></tr>`).join('')}
           `).join('')}
         </tbody>
       </table>
       <div class="concept-footer">
-        <button class="btn-dl pdf"  onclick="downloadConceptPDF('${esc(c.campaign)}')">↓ PDF</button>
-        <button class="btn-dl"      onclick="downloadConcept('${esc(c.campaign)}','xlsx')">↓ Excel</button>
-        <button class="btn-dl"      onclick="downloadConcept('${esc(c.campaign)}','csv')">↓ CSV</button>
+        <button class="btn-dl pdf"  onclick="downloadConceptPDF('${esc(c.project)}')">↓ PDF</button>
+        <button class="btn-dl"      onclick="downloadConcept('${esc(c.project)}','xlsx')">↓ Excel</button>
+        <button class="btn-dl"      onclick="downloadConcept('${esc(c.project)}','csv')">↓ CSV</button>
       </div>
     </div>`).join('');
 
@@ -884,202 +910,234 @@ const C = {
   border:    [225, 218, 206],
 };
 
-function buildConceptPDF(conceptKey) {
-  const c = aggregated[conceptKey];
+function drawPageFooter(doc, W, H, mL, mR, refs) {
+  // identical layout to Meta invoice footer: two columns, small text
+  const fY = H - 28;
+  doc.setDrawColor(...C.border);
+  doc.setLineWidth(0.3);
+  doc.line(mL, fY, W - mR, fY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(...C.text3);
+
+  // Left col: Meta
+  doc.text('Meta Platforms Ireland Limited', mL, fY + 5.5);
+  doc.text('Merrion Road', mL, fY + 9.5);
+  doc.text('Dublin 4', mL, fY + 13.5);
+  doc.text('D04 X2K5', mL, fY + 17.5);
+  doc.text('Ireland', mL, fY + 21.5);
+  doc.text('VAT Reg. No. IE9692928F', mL, fY + 25.5);
+
+  // Right col: Activum
+  const rx = W - mR;
+  doc.text('ACTIVUM GESTION DE PROYECTOS INMOBILIARIOS, S.L.', rx, fY + 5.5, { align: 'right' });
+  doc.text('Calle Colombia, 11, 9, Oficina 83', rx, fY + 9.5, { align: 'right' });
+  doc.text('03010 Alicante', rx, fY + 13.5, { align: 'right' });
+  doc.text('España', rx, fY + 17.5, { align: 'right' });
+  doc.text('VAT: ESB54591102', rx, fY + 21.5, { align: 'right' });
+  if (refs && refs.length) {
+    doc.text(refs[0], rx, fY + 25.5, { align: 'right' });
+  }
+}
+
+function buildConceptPDF(projectKey) {
+  const c = aggregated[projectKey];
   if (!c) return null;
 
   try {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const W = 210, H = 297, mL = 20, mR = 20, cW = W - mL - mR;
+    const W = 210, H = 297, mL = 18, mR = 18, cW = W - mL - mR;
     const totalStr = fmt(c.total, c.currency);
-    const totalFiles = files.filter(f => f.status === 'done').length;
+    const footerH = 33; // height reserved at bottom for footer
+    const bodyBottom = H - footerH - 5;
 
-    // ── HEADER ───────────────────────────────────────────────────────────
-    // Left: "Refacturación para" (label) + concept name (title) + company
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(...C.text2);
-    doc.text('Refacturación para', mL, 20);
+    // collect unique invoice refs for footer
+    const refs = [...new Set(c.tramos.map(t => t.invoice_ref).filter(Boolean))];
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
-    doc.setTextColor(...C.text);
-    const titleLines = doc.splitTextToSize(c.campaign, cW * 0.62);
-    doc.text(titleLines, mL, 28);
+    const drawHeader = (isFirst) => {
+      // ── TOP HEADER (same on every page) ──────────────────────────────
+      // Left: project title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(...C.text);
+      doc.text(c.project, mL, 18);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...C.text3);
-    doc.text('Activum Gestión de Proyectos Inmobiliarios, S.L.', mL, 36);
-
-    // Right: ACTIVUM wordmark
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(17);
-    doc.setTextColor(...C.burgundy);
-    doc.setCharSpace(1.5);
-    doc.text('ACTIVUM', W - mR, 25, { align: 'right' });
-    doc.setCharSpace(0);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.setTextColor(...C.gold);
-    doc.text('Real Estate', W - mR, 31, { align: 'right' });
-
-    // Separator
-    doc.setDrawColor(...C.border);
-    doc.setLineWidth(0.4);
-    doc.line(mL, 43, W - mR, 43);
-
-    // ── INFO LEFT + TOTAL RIGHT ───────────────────────────────────────────
-    const infoItems = [
-      { label: 'Fecha de nota de pago/comprobante', value: reportDate },
-      { label: 'Método de pago', value: 'Meta Ads Rebilling Agent' },
-      { label: 'Número de referencia', value: 'ACTV-' + new Date().getFullYear() + '-' + String(Object.keys(aggregated).indexOf(conceptKey) + 1).padStart(3,'0') },
-      { label: 'Facturas de origen', value: totalFiles + ' factura(s) procesada(s)' },
-      { label: 'Tipo de servicio', value: 'Meta Ads · Publicidad digital' },
-    ];
-
-    let ly = 53;
-    infoItems.forEach(item => {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
+      doc.setFontSize(7.5);
       doc.setTextColor(...C.text3);
-      doc.text(item.label, mL, ly);
-      ly += 4.5;
+      doc.text('Identificador de la cuenta: 494583079138281', mL, 24);
+
+      // Right: ∞ Meta wordmark simulation
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
+      doc.setFontSize(11);
       doc.setTextColor(...C.text);
-      doc.text(item.value, mL, ly);
-      ly += 8;
-    });
+      doc.text('∞ Meta', W - mR, 18, { align: 'right' });
 
-    // Right: "Pagado" + big total + description
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(22, 160, 80);
-    doc.text('Pagado', W - mR, 53, { align: 'right' });
+      // Separator
+      doc.setDrawColor(...C.border);
+      doc.setLineWidth(0.4);
+      doc.line(mL, 28, W - mR, 28);
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(28);
-    doc.setTextColor(...C.text);
-    doc.text(totalStr, W - mR, 68, { align: 'right' });
+      if (isFirst) {
+        // Info block (only on first page, like Meta invoice)
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...C.text2);
+        doc.text('Fecha de nota de pago/comprobante de pago', mL, 36);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(...C.text);
+        doc.text(reportDate, mL, 41);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...C.text3);
-    const descLines = doc.splitTextToSize(
-      'Importe total acumulado de ' + totalFiles + ' factura(s) de Meta Ads.',
-      cW * 0.44
-    );
-    doc.text(descLines, W - mR, 76, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...C.text2);
+        doc.text('Tipo de servicio', mL, 49);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(...C.text);
+        doc.text('Meta anuncios', mL, 54);
 
-    // Second separator
-    const sep2Y = Math.max(ly + 5, 120);
-    doc.setDrawColor(...C.border);
-    doc.setLineWidth(0.4);
-    doc.line(mL, sep2Y, W - mR, sep2Y);
+        // Right: Pagado + big total
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(22, 160, 80);
+        doc.text('Pagado', W - mR, 36, { align: 'right' });
 
-    // ── CAMPAÑAS ─────────────────────────────────────────────────────────
-    let y = sep2Y + 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(26);
+        doc.setTextColor(...C.text);
+        doc.text(totalStr, W - mR, 52, { align: 'right' });
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(...C.text);
-    doc.text('Campañas', mL, y);
-    y += 12;
-
-    const footerStart = H - 38;
-
-    c.entries.forEach(e => {
-      if (y > footerStart - 20) { doc.addPage(); y = 20; }
-
-      // Campaign header: name (bold) + total (right)
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...C.text);
-      doc.text(c.campaign, mL, y);
-      doc.text(fmt(e.total, c.currency), W - mR, y, { align: 'right' });
-      y += 5;
-
-      // Period (gray, small)
-      if (e.period) {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7);
         doc.setTextColor(...C.text3);
-        doc.text('De ' + e.period, mL, y);
-        y += 5;
+        const desc = doc.splitTextToSize('Total acumulado de publicidad Meta Ads.', cW * 0.4);
+        doc.text(desc, W - mR, 58, { align: 'right' });
+
+        // Second separator
+        doc.setDrawColor(...C.border);
+        doc.setLineWidth(0.4);
+        doc.line(mL, 64, W - mR, 64);
+
+        // "Campañas" heading
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(...C.text);
+        doc.text('Campañas', mL, 73);
+
+        // Top separator under heading
+        doc.setDrawColor(...C.border);
+        doc.setLineWidth(0.3);
+        doc.line(mL, 76, W - mR, 76);
+
+        return 80; // y start
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(...C.text);
+        doc.text('Campañas (cont.)', mL, 36);
+        doc.setDrawColor(...C.border);
+        doc.setLineWidth(0.3);
+        doc.line(mL, 39, W - mR, 39);
+        return 44;
+      }
+    };
+
+    let y = drawHeader(true);
+    let pageNum = 1;
+
+    c.tramos.forEach(t => {
+      // check if we need a new page for the tramo header
+      if (y > bodyBottom - 20) {
+        drawPageFooter(doc, W, H, mL, mR, refs);
+        doc.addPage();
+        pageNum++;
+        y = drawHeader(false);
       }
 
-      // Dashed separator
+      // Tramo header: project name bold left + total right
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...C.text);
+      doc.text(c.project, mL, y);
+      doc.text(fmt(t.total, c.currency), W - mR, y, { align: 'right' });
+      y += 4.5;
+
+      // Period
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...C.text2);
+      doc.text('De ' + (t.period || ''), mL, y);
+      y += 4;
+
+      // Dashed line
       doc.setDrawColor(...C.border);
       doc.setLineWidth(0.15);
       const dL = 1.8, gL = 1.2;
       for (let dx = mL; dx < W - mR - dL; dx += dL + gL) {
         doc.line(dx, y, dx + dL, y);
       }
-      y += 6;
+      y += 5;
 
-      // Sub-items (indented)
-      const indent = mL + 10;
-      e.items.forEach(it => {
-        if (y > footerStart - 8) { doc.addPage(); y = 20; }
+      // Line items (indented, like Meta)
+      const indent = mL + 12;
+      t.items.forEach(it => {
+        if (y > bodyBottom - 6) {
+          drawPageFooter(doc, W, H, mL, mR, refs);
+          doc.addPage();
+          pageNum++;
+          y = drawHeader(false);
+        }
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         doc.setTextColor(...C.text2);
-        const iNameLines = doc.splitTextToSize(it.name, cW - 55);
-        doc.text(iNameLines, indent, y);
-        if (it.impressions != null) {
+        const nameW = cW - 50;
+        const nameLines = doc.splitTextToSize(it.name, nameW);
+        doc.text(nameLines, indent, y);
+        if (it.impressions) {
           doc.setTextColor(...C.text3);
-          doc.text(new Intl.NumberFormat('es-ES').format(it.impressions) + ' Impresiones', W - mR - 30, y, { align: 'right' });
+          doc.text(new Intl.NumberFormat('es-ES').format(it.impressions) + ' Impresiones', W - mR - 28, y, { align: 'right' });
         }
-        doc.setFont('helvetica', 'normal');
         doc.setTextColor(...C.text2);
         doc.text(fmt(it.amount, c.currency), W - mR, y, { align: 'right' });
-        y += iNameLines.length > 1 ? iNameLines.length * 4.5 : 6;
+        y += nameLines.length > 1 ? nameLines.length * 4.5 : 6;
       });
 
-      y += 5;
+      y += 4; // gap between tramos
     });
 
-    // Total row
-    doc.setDrawColor(...C.text);
-    doc.setLineWidth(0.5);
+    // Total final line
+    if (y > bodyBottom - 10) {
+      drawPageFooter(doc, W, H, mL, mR, refs);
+      doc.addPage();
+      y = drawHeader(false);
+    }
+    doc.setDrawColor(...C.border);
+    doc.setLineWidth(0.4);
     doc.line(mL, y, W - mR, y);
-    y += 7;
-
+    y += 6;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(...C.text);
     doc.text('Total', mL, y);
     doc.text(totalStr, W - mR, y, { align: 'right' });
 
-    // ── FOOTER ───────────────────────────────────────────────────────────
-    const fY = H - 30;
-    doc.setDrawColor(...C.border);
-    doc.setLineWidth(0.3);
-    doc.line(mL, fY, W - mR, fY);
+    // Footer on last page
+    drawPageFooter(doc, W, H, mL, mR, refs);
 
+    // VAT disclaimer (last line, like Meta)
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
+    doc.setFontSize(5.8);
     doc.setTextColor(...C.text3);
-
-    doc.text('Activum Gestión de Proyectos Inmobiliarios, S.L.', mL, fY + 6);
-    doc.text('Calle Colombia, 11, 9, Oficina 83', mL, fY + 11);
-    doc.text('03010 Alicante · España', mL, fY + 16);
-    doc.text('VAT: ESB54591102', mL, fY + 21);
-
-    doc.text('Generado por Activum Innovación', W - mR, fY + 6, { align: 'right' });
-    doc.text('Meta Ads Rebilling Agent', W - mR, fY + 11, { align: 'right' });
-    doc.text(reportDate, W - mR, fY + 16, { align: 'right' });
-
-    doc.setFontSize(5.5);
     doc.text(
-      'Documento generado automáticamente por el sistema de refacturación de Activum. ' +
-      'Los importes reflejan los costes de Meta Ads para redistribución interna.',
-      mL, fY + 26, { maxWidth: cW }
+      'Customer to account for any VAT arising on this supply in accordance with Article 196, Council Directive 2006/112/EC.',
+      mL, H - 3, { maxWidth: cW }
     );
 
-    return { doc, filename: 'activum_refacturacion_' + slugify(c.campaign) + '.pdf' };
+    return { doc, filename: 'activum_refacturacion_' + slugify(c.project) + '.pdf' };
   } catch (err) {
     log('Error generando PDF: ' + err.message, 'err');
     console.error(err);
@@ -1118,29 +1176,29 @@ function downloadAllPDF() {
 
 
 /* CSV / Excel */
-function downloadConcept(concept, format) {
-  const c = aggregated[concept]; if (!c) return;
-  const rows = [['Campaña','Factura origen','Período','Línea','Impresiones','Importe','Moneda']];
-  for (const e of c.entries) {
-    for (const it of e.items) {
-      rows.push([c.campaign, e.file, e.period||'', it.name, it.impressions??'', it.amount, c.currency]);
+function downloadConcept(project, format) {
+  const c = aggregated[project]; if (!c) return;
+  const rows = [['Proyecto','Factura origen','Período','Línea de anuncio','Impresiones','Importe','Moneda']];
+  for (const t of c.tramos) {
+    for (const it of t.items) {
+      rows.push([c.project, t.file, t.period||'', it.name, it.impressions??'', it.amount, c.currency]);
     }
-    rows.push(['','','','SUBTOTAL '+e.file,'', e.total, c.currency]);
+    rows.push(['','','','SUBTOTAL tramo','', t.total, c.currency]);
     rows.push([]);
   }
   rows.push(['','','','TOTAL','', c.total, c.currency]);
-  exportRows(rows, `activum_rebilling_${slugify(concept)}`, format);
+  exportRows(rows, `activum_rebilling_${slugify(project)}`, format);
 }
 
 function downloadAll(format) {
-  const rows = [['Campaña','Factura origen','Período','Línea','Impresiones','Importe','Moneda']];
+  const rows = [['Proyecto','Factura origen','Período','Línea de anuncio','Impresiones','Importe','Moneda']];
   for (const c of Object.values(aggregated)) {
-    for (const e of c.entries) {
-      for (const it of e.items) {
-        rows.push([c.campaign, e.file, e.period||'', it.name, it.impressions??'', it.amount, c.currency]);
+    for (const t of c.tramos) {
+      for (const it of t.items) {
+        rows.push([c.project, t.file, t.period||'', it.name, it.impressions??'', it.amount, c.currency]);
       }
     }
-    rows.push(['','','','SUBTOTAL '+c.campaign,'', c.total, c.currency]);
+    rows.push(['','','','SUBTOTAL '+c.project,'', c.total, c.currency]);
     rows.push([]);
   }
   exportRows(rows, 'activum_meta_ads_refacturacion_completa', format);
