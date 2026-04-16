@@ -660,6 +660,25 @@ body {
 
 <script>
 let files = [], aggregated = {}, rawResults = [], reportDate = '';
+let logoDataUrl = null;
+
+function initLogo() {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 120;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, size, size);
+      logoDataUrl = canvas.toDataURL('image/png');
+      resolve();
+    };
+    img.onerror = () => resolve(); // silently skip if not found
+    img.src = '/logo.svg';
+  });
+}
+initLogo();
 
 
 
@@ -969,11 +988,15 @@ function buildConceptPDF(projectKey) {
       doc.setTextColor(...C.text3);
       doc.text('Identificador de la cuenta: 494583079138281', mL, 24);
 
-      // Right: ∞ Meta wordmark simulation
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.setTextColor(...C.text);
-      doc.text('∞ Meta', W - mR, 18, { align: 'right' });
+      // Right: Meta logo
+      if (logoDataUrl) {
+        doc.addImage(logoDataUrl, 'PNG', W - mR - 22, 10, 22, 22);
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(...C.text);
+        doc.text('∞ Meta', W - mR, 18, { align: 'right' });
+      }
 
       // Separator
       doc.setDrawColor(...C.border);
