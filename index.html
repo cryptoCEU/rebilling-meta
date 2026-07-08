@@ -738,8 +738,9 @@ async function extractFromPDF(fileObj) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       max_tokens: 2000,
+      thinking: { type: 'disabled' },
       system: `You are a Meta Ads invoice parser. Extract structured data from a Meta Ads invoice PDF.
 Return ONLY a valid JSON object with this exact shape:
 {
